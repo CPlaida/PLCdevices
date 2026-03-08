@@ -65,8 +65,17 @@
       <div class="plc-dropzone" id="plcDropzone">
         <div class="plc-header">
           <div>
-            <div style="font-weight:800;" id="plcName">No device selected</div>
-            <div class="meta" id="plcMeta"></div>
+            <div class="plc-title">
+              <div class="plc-title-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <rect x="2.5" y="3" width="19" height="11" rx="2" fill="#f8fafc" stroke="#6b7280" stroke-width="1.2"></rect>
+                  <rect x="5.2" y="6.4" width="13.6" height="4.2" rx="1" fill="#e5e7eb"></rect>
+                  <rect x="4" y="15.5" width="6.2" height="4.8" rx="0.8" fill="#d1d5db" stroke="#6b7280" stroke-width="0.8"></rect>
+                  <rect x="13.8" y="15.5" width="6.2" height="4.8" rx="0.8" fill="#d1d5db" stroke="#6b7280" stroke-width="0.8"></rect>
+                </svg>
+              </div>
+              <div class="plc-title-name" id="plcName">No device selected</div>
+            </div>
           </div>
         </div>
 
@@ -75,6 +84,36 @@
             <svg class="svg-connectors" id="connectors"></svg>
             <div id="roomsArea"></div>
           </div>
+
+          <aside class="device-panel" id="devicePanel">
+            <div class="device-panel-title">Device Properties</div>
+            <div class="device-panel-grid">
+              <div class="device-panel-field">
+                <div class="device-panel-label">Device ID</div>
+                <div class="device-panel-value" id="dpDeviceId">-</div>
+              </div>
+              <div class="device-panel-field">
+                <div class="device-panel-label">IP Address</div>
+                <div class="device-panel-value" id="dpIp">-</div>
+              </div>
+              <div class="device-panel-field">
+                <div class="device-panel-label">Switch Capacity</div>
+                <div class="device-panel-value" id="dpSwitch">-</div>
+              </div>
+              <div class="device-panel-field">
+                <div class="device-panel-label">Current - A</div>
+                <div class="device-panel-value" id="dpCurrent">N/A</div>
+              </div>
+              <div class="device-panel-field">
+                <div class="device-panel-label">Voltage</div>
+                <div class="device-panel-value" id="dpVoltage">N/A</div>
+              </div>
+              <div class="device-panel-field">
+                <div class="device-panel-label">Power</div>
+                <div class="device-panel-value" id="dpPower">-</div>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </main>
@@ -90,14 +129,14 @@
     <div class="app-modal">
       <button class="close" id="modalClose">Close</button>
       <h3>Appliance Properties</h3>
-      <div style="font-size:12px;margin-bottom:10px;"><b>Name:</b> <span id="mName"></span></div>
       <div class="grid">
+        <div class="field"><b>Appliance ID</b><div id="mApplianceId"></div></div>
         <div class="field"><b>Brand</b><div id="mBrand"></div></div>
         <div class="field"><b>Volts</b><div id="mVolts"></div></div>
+        <div class="field"><b>Currents-Amps</b><div id="mCurrent"></div></div>
         <div class="field"><b>HP</b><div id="mHp"></div></div>
-        <div class="field"><b>Watts</b><div id="mWatts"></div></div>
-        <div class="field"><b>Current (Amps)</b><div id="mCurrent"></div></div>
-        <div class="field"><b>Status</b><div id="mStatus"></div></div>
+        <div class="field"><b>Power-Watts</b><div id="mWatts"></div></div>
+        <div class="field"><b>Switch Code</b><div id="mSwitchCode"></div></div>
       </div>
     </div>
   </div>
@@ -124,23 +163,16 @@
               <input id="adSwitch" type="number" min="1" step="1" placeholder="Enter 1, 2, 4, or 8" class="form-control rounded-3" />
             </div>
             <div class="col-md-6">
-              <label for="adName" class="form-label fw-semibold">Name</label>
-              <input id="adName" type="text" placeholder="PLC-x" class="form-control rounded-3" />
+              <label for="adCurrent" class="form-label fw-semibold">Current - A</label>
+              <input id="adCurrent" type="number" step="0.01" min="0" placeholder="0.00" class="form-control rounded-3" />
             </div>
             <div class="col-md-6">
-              <label for="adFw" class="form-label fw-semibold">Firmware</label>
-              <input id="adFw" type="text" placeholder="v1.0" class="form-control rounded-3" />
+              <label for="adVoltage" class="form-label fw-semibold">Voltage</label>
+              <input id="adVoltage" type="text" placeholder="220-230" class="form-control rounded-3" />
             </div>
             <div class="col-md-6">
               <label for="adPower" class="form-label fw-semibold">Power</label>
               <input id="adPower" type="number" step="0.01" min="0" placeholder="0.00" class="form-control rounded-3" />
-            </div>
-            <div class="col-md-6">
-              <label for="adStatus" class="form-label fw-semibold">Status</label>
-              <select id="adStatus" class="form-select rounded-3">
-                <option value="1" selected>1 (Active)</option>
-                <option value="0">0 (Inactive)</option>
-              </select>
             </div>
           </div>
         </div>
@@ -165,10 +197,6 @@
               <input id="diDeviceId" type="text" class="form-control rounded-3" readonly />
             </div>
             <div class="col-md-6">
-              <label class="form-label fw-semibold">Name</label>
-              <input id="diName" type="text" class="form-control rounded-3" readonly />
-            </div>
-            <div class="col-md-6">
               <label class="form-label fw-semibold">IP Address</label>
               <input id="diIp" type="text" class="form-control rounded-3" readonly />
             </div>
@@ -177,18 +205,64 @@
               <input id="diSwitch" type="text" class="form-control rounded-3" readonly />
             </div>
             <div class="col-md-6">
-              <label class="form-label fw-semibold">Firmware</label>
-              <input id="diFw" type="text" class="form-control rounded-3" readonly />
+              <label class="form-label fw-semibold">Current - A</label>
+              <input id="diCurrent" type="text" class="form-control rounded-3" readonly />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Voltage</label>
+              <input id="diVoltage" type="text" class="form-control rounded-3" readonly />
             </div>
             <div class="col-md-6">
               <label class="form-label fw-semibold">Power</label>
               <input id="diPower" type="text" class="form-control rounded-3" readonly />
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="editDeviceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header border-0 pb-0">
+          <h5 class="modal-title fw-bold">Edit Device</h5>
+          <button type="button" class="btn btn-light rounded-3 ms-auto" data-bs-dismiss="modal">Close</button>
+        </div>
+        <div class="modal-body pt-2">
+          <div class="row g-3">
             <div class="col-md-6">
-              <label class="form-label fw-semibold">Status</label>
-              <input id="diStatus" type="text" class="form-control rounded-3" readonly />
+              <label class="form-label fw-semibold">Device ID</label>
+              <input id="edDeviceId" type="text" class="form-control rounded-3" readonly />
+            </div>
+            <div class="col-md-6">
+              <label for="edName" class="form-label fw-semibold">Device Name</label>
+              <input id="edName" type="text" class="form-control rounded-3" />
+            </div>
+            <div class="col-md-6">
+              <label for="edIp" class="form-label fw-semibold">IP Address</label>
+              <input id="edIp" type="text" class="form-control rounded-3" />
+            </div>
+            <div class="col-md-6">
+              <label for="edSwitch" class="form-label fw-semibold">Switch Capacity</label>
+              <input id="edSwitch" type="number" min="1" step="1" class="form-control rounded-3" />
+            </div>
+            <div class="col-md-6">
+              <label for="edCurrent" class="form-label fw-semibold">Current - A</label>
+              <input id="edCurrent" type="number" min="0" step="0.01" class="form-control rounded-3" />
+            </div>
+            <div class="col-md-6">
+              <label for="edVoltage" class="form-label fw-semibold">Voltage</label>
+              <input id="edVoltage" type="text" class="form-control rounded-3" />
+            </div>
+            <div class="col-md-6">
+              <label for="edPower" class="form-label fw-semibold">Power</label>
+              <input id="edPower" type="number" min="0" step="0.01" class="form-control rounded-3" />
             </div>
           </div>
+        </div>
+        <div class="modal-footer border-0 pt-0">
+          <button id="editDeviceSave" class="btn btn-primary px-4 rounded-3">Save Changes</button>
         </div>
       </div>
     </div>
@@ -233,23 +307,6 @@
         </div>
         <div class="modal-body pt-2">
           <div class="row g-3">
-            <div class="col-md-6">
-              <label for="aaType" class="form-label fw-semibold">Type</label>
-              <select id="aaType" class="form-select rounded-3">
-                <option value="" selected disabled>Select type</option>
-                <option value="ac">AC</option>
-                <option value="fan">Fan</option>
-                <option value="light">Light</option>
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label for="aaStatus" class="form-label fw-semibold">Status</label>
-              <select id="aaStatus" class="form-select rounded-3">
-                <option value="" selected disabled>Select status</option>
-                <option value="OF">OFF</option>
-                <option value="ON">ON</option>
-              </select>
-            </div>
             <div class="col-md-12">
               <label for="aaName" class="form-label fw-semibold">Appliance Name</label>
               <input id="aaName" type="text" placeholder="Enter appliance name" autocomplete="off" class="form-control rounded-3" />
@@ -261,6 +318,18 @@
             <div class="col-md-12">
               <label for="aaIp" class="form-label fw-semibold">IP Address</label>
               <input id="aaIp" type="text" placeholder="Enter IP address" autocomplete="off" class="form-control rounded-3" />
+            </div>
+            <div class="col-md-12">
+              <label for="aaBrand" class="form-label fw-semibold">Brand</label>
+              <input id="aaBrand" type="text" placeholder="Enter brand" autocomplete="off" class="form-control rounded-3" />
+            </div>
+            <div class="col-md-6">
+              <label for="aaVolts" class="form-label fw-semibold">Volts</label>
+              <input id="aaVolts" type="number" min="0" step="0.01" autocomplete="off" class="form-control rounded-3" />
+            </div>
+            <div class="col-md-6">
+              <label for="aaSwitchCode" class="form-label fw-semibold">Switch Code</label>
+              <input id="aaSwitchCode" type="text" placeholder="Enter switch code" autocomplete="off" class="form-control rounded-3" />
             </div>
             <div class="col-md-4">
               <label for="aaPower" class="form-label fw-semibold">Power</label>

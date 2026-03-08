@@ -7,9 +7,11 @@ const state = {
   appliances: [],
   placedDeviceId: null,
   ignoreClickUntil: 0,
+  hasApplianceExtras: true,
 };
 let addDeviceModalInstance = null;
 let deviceInfoModalInstance = null;
+let editDeviceModalInstance = null;
 let addRoomModalInstance = null;
 let addApplianceModalInstance = null;
 const pendingCreate = {
@@ -17,8 +19,178 @@ const pendingCreate = {
   appliance: null,
 };
 const POSITION_STORE_KEY = 'plc_deployer_positions_v1';
+const DEVICE_EXTRAS_STORE_KEY = 'plc_deployer_device_extras_v1';
 
 function qs(sel, root = document) { return root.querySelector(sel); }
+
+function readDeviceExtrasStore() {
+  try {
+    const raw = localStorage.getItem(DEVICE_EXTRAS_STORE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDeviceExtrasStore(store) {
+  try {
+    localStorage.setItem(DEVICE_EXTRAS_STORE_KEY, JSON.stringify(store));
+  } catch {
+    // ignore
+  }
+}
+
+function getDeviceExtras(deviceId) {
+  const store = readDeviceExtrasStore();
+  const row = store[String(deviceId)];
+  return row && typeof row === 'object' ? row : { current_a: '', voltage: '' };
+}
+
+function setDeviceExtras(deviceId, extras) {
+  const store = readDeviceExtrasStore();
+  store[String(deviceId)] = {
+    current_a: extras?.current_a ?? '',
+    voltage: extras?.voltage ?? '',
+  };
+  writeDeviceExtrasStore(store);
+}
+
+function showEditDeviceModal(device) {
+  if (!window.bootstrap) return;
+  if (!editDeviceModalInstance) {
+    editDeviceModalInstance = new window.bootstrap.Modal(qs('#editDeviceModal'));
+  }
+  qs('#edDeviceId').value = String(device.device_id ?? '');
+  qs('#edName').value = String(device.name ?? '');
+  qs('#edIp').value = String(device.IP_address ?? '');
+  qs('#edSwitch').value = String(device.switch ?? '');
+  const extras = getDeviceExtras(device.device_id);
+  const cur = qs('#edCurrent');
+  if (cur) cur.value = extras.current_a ?? '';
+  const volt = qs('#edVoltage');
+  if (volt) volt.value = extras.voltage ?? '';
+  qs('#edPower').value = String(device.power ?? '');
+  editDeviceModalInstance.show();
+}
+
+function hideEditDeviceModal() {
+  if (editDeviceModalInstance) editDeviceModalInstance.hide();
+}
+
+async function saveDeviceEdits() {
+  const deviceId = Number.parseInt(String(qs('#edDeviceId').value || '').trim(), 10);
+  const name = String(qs('#edName').value || '').trim();
+  const ip = String(qs('#edIp').value || '').trim();
+  const switchRaw = String(qs('#edSwitch').value || '').trim();
+  const currentRaw = String(qs('#edCurrent')?.value || '').trim();
+  const voltage = String(qs('#edVoltage')?.value || '').trim();
+  const powerRaw = String(qs('#edPower').value || '').trim();
+  const sw = Number.parseInt(switchRaw, 10);
+  const power = powerRaw === '' ? 0 : Number.parseFloat(powerRaw);
+
+  if (!Number.isInteger(deviceId) || deviceId <= 0) {
+    alert('Invalid device id');
+    return;
+  }
+  if (!name) {
+    alert('Device name is required.');
+    return;
+  }
+  if (!ipV4Valid(ip)) {
+    alert('Enter a valid IPv4 address.');
+    return;
+  }
+  if (!Number.isInteger(sw) || ![1, 2, 4, 8, 16].includes(sw)) {
+    alert('Switch capacity must be one of 1, 2, 4, 8, 16.');
+    return;
+  }
+  if (!Number.isFinite(power) || power < 0) {
+    alert('Power must be a valid non-negative number.');
+    return;
+  }
+
+  if (currentRaw !== '') {
+    const current = Number.parseFloat(currentRaw);
+    if (!Number.isFinite(current) || current < 0) {
+      alert('Current-A must be a valid non-negative number.');
+      return;
+    }
+  }
+  if (voltage !== '' && voltage.length > 20) {
+    alert('Voltage value is too long.');
+    return;
+  }
+
+  try {
+    await api('api/update_device.php', {
+      device_id: deviceId,
+      name,
+      IP_address: ip,
+      switch: sw,
+      power,
+    });
+
+    setDeviceExtras(deviceId, { current_a: currentRaw, voltage });
+
+    // Update in-memory copy (so panels update instantly)
+    const local = state.devices.find(d => Number(d.device_id) === deviceId);
+    if (local) {
+      local.name = name;
+      local.IP_address = ip;
+      local.switch = sw;
+      local.power = power;
+    }
+    if (state.activeDevice && Number(state.activeDevice.device_id) === deviceId) {
+      state.activeDevice.name = name;
+      state.activeDevice.IP_address = ip;
+      state.activeDevice.switch = sw;
+      state.activeDevice.power = power;
+      renderPLC();
+    }
+
+    hideEditDeviceModal();
+    await loadDevices();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+function clearDevicePanel() {
+  const map = {
+    dpDeviceId: '-',
+    dpIp: '-',
+    dpSwitch: '-',
+    dpCurrent: 'N/A',
+    dpVoltage: 'N/A',
+    dpPower: '-',
+  };
+  Object.entries(map).forEach(([id, val]) => {
+    const el = qs(`#${id}`);
+    if (el) el.textContent = val;
+  });
+}
+
+function updateDevicePanel(device) {
+  if (!device) {
+    clearDevicePanel();
+    return;
+  }
+
+  const set = (id, val) => {
+    const el = qs(`#${id}`);
+    if (el) el.textContent = val;
+  };
+
+  set('dpDeviceId', String(device.device_id ?? '-'));
+  set('dpIp', String(device.IP_address ?? '-'));
+  set('dpSwitch', String(device.switch ?? '-'));
+  set('dpPower', String(device.power ?? '-'));
+
+  const extras = getDeviceExtras(device.device_id);
+  set('dpCurrent', extras.current_a !== '' ? String(extras.current_a) : 'N/A');
+  set('dpVoltage', extras.voltage !== '' ? String(extras.voltage) : 'N/A');
+}
 function qsa(sel, root = document) { return [...root.querySelectorAll(sel)]; }
 
 async function api(url, payload) {
@@ -173,9 +345,15 @@ function renderSidebar() {
       e.stopPropagation();
       await deleteDevice(d.device_id);
     });
-    el.addEventListener('click', () => {
-      if (Date.now() < state.ignoreClickUntil) return;
-      showDeviceInfoModal(d);
+    el.addEventListener('click', (e) => {
+      // Do not activate/select device on click; only allow drag-drop into PLC dropzone.
+      // Keep click to support focusing and UX, but prevent any default navigation.
+      e.preventDefault();
+    });
+    el.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      state.ignoreClickUntil = Date.now() + 350;
+      showEditDeviceModal(d);
     });
     list.appendChild(el);
   });
@@ -205,25 +383,23 @@ async function deleteDevice(deviceId) {
 }
 
 function renderPLC() {
-  const plcMeta = qs('#plcMeta');
   const plcName = qs('#plcName');
   const drop = qs('#plcDropzone');
 
   if (!state.activeDevice) {
     plcName.textContent = 'No device selected';
-    plcMeta.textContent = '';
     drop.classList.add('disabled');
     drop.classList.remove('plc-off');
     qs('#roomsArea').innerHTML = '';
     clearConnectors();
+    updateDevicePanel(null);
     return;
   }
 
   drop.classList.remove('disabled');
   drop.classList.toggle('plc-off', plcIsOff());
   plcName.textContent = `${state.activeDevice.name}`;
-  const offText = plcIsOff() ? ' | STATUS: OFF' : '';
-  plcMeta.textContent = `DEVICE ID: ${state.activeDevice.device_id} | IP: ${state.activeDevice.IP_address} | SWITCH: ${state.activeDevice.switch}${offText}`;
+  updateDevicePanel(state.activeDevice);
 }
 
 function clearConnectors() {
@@ -487,13 +663,23 @@ async function setApplianceStatus(deploymentId, status, cardEl = null) {
 
 function showModal(appliance) {
   qs('#modalBackdrop').style.display = 'flex';
-  qs('#mName').textContent = appliance.appliance_name;
-  qs('#mBrand').textContent = appliance.brand ?? '';
-  qs('#mVolts').textContent = appliance.volts ?? '';
-  qs('#mHp').textContent = appliance.hp;
-  qs('#mWatts').textContent = appliance.watts ?? appliance.power;
-  qs('#mCurrent').textContent = appliance.current;
-  qs('#mStatus').textContent = appliance.status;
+
+  const local = state.appliances.find(a => Number(a.deployment_id) === Number(appliance.deployment_id)) || null;
+  const pick = (k, fallback = '') => {
+    const v = appliance?.[k];
+    if (v !== undefined && v !== null && String(v) !== '') return v;
+    const lv = local?.[k];
+    if (lv !== undefined && lv !== null && String(lv) !== '') return lv;
+    return fallback;
+  };
+
+  qs('#mApplianceId').textContent = String(pick('appliance_id', ''));
+  qs('#mBrand').textContent = String(pick('brand', ''));
+  qs('#mVolts').textContent = String(pick('volts', '0'));
+  qs('#mCurrent').textContent = String(pick('current', ''));
+  qs('#mHp').textContent = String(pick('hp', ''));
+  qs('#mWatts').textContent = String(pick('watts', pick('power', '')));
+  qs('#mSwitchCode').textContent = String(pick('switch_code', ''));
 }
 
 function hideModal() {
@@ -706,8 +892,26 @@ async function loadDeployment() {
   const data = await api(`api/get_deployment.php?device_id=${state.activeDevice.device_id}`);
   state.rooms = data.rooms;
   state.appliances = data.appliances;
+  state.hasApplianceExtras = data.has_appliance_extras !== false;
   applyStoredPositions(state.activeDevice.device_id, state.rooms, state.appliances);
   renderRooms();
+}
+
+function setApplianceExtrasEnabled(enabled) {
+  const ids = ['#aaVolts', '#aaSwitchCode'];
+  ids.forEach((sel) => {
+    const el = qs(sel);
+    if (!el) return;
+    el.disabled = !enabled;
+    if (!enabled) el.value = '';
+  });
+
+  // Hide their parent columns to avoid confusing the user
+  ids.forEach((sel) => {
+    const el = qs(sel);
+    const parent = el ? el.closest('.col-md-12, .col-md-6, .col-md-4') : null;
+    if (parent) parent.style.display = enabled ? '' : 'none';
+  });
 }
 
 function showAddDeviceModal() {
@@ -715,6 +919,16 @@ function showAddDeviceModal() {
     addDeviceModalInstance = new window.bootstrap.Modal(qs('#addDeviceModal'));
   }
   if (addDeviceModalInstance) addDeviceModalInstance.show();
+  fetchNextDeviceId().catch(() => {
+    const el = qs('#adDeviceId');
+    if (el) el.value = 'Auto-generated';
+  });
+}
+
+async function fetchNextDeviceId() {
+  const data = await api('api/get_next_device_id.php');
+  const el = qs('#adDeviceId');
+  if (el) el.value = String(data.next_device_id);
 }
 
 function hideAddDeviceModal() {
@@ -727,12 +941,13 @@ function showDeviceInfoModal(device) {
     deviceInfoModalInstance = new window.bootstrap.Modal(qs('#deviceInfoModal'));
   }
   qs('#diDeviceId').value = String(device.device_id ?? '');
-  qs('#diName').value = String(device.name ?? '');
   qs('#diIp').value = String(device.IP_address ?? '');
   qs('#diSwitch').value = String(device.switch ?? '');
-  qs('#diFw').value = String(device.fw ?? '');
+  const cur = qs('#diCurrent');
+  if (cur) cur.value = 'N/A';
+  const volt = qs('#diVoltage');
+  if (volt) volt.value = 'N/A';
   qs('#diPower').value = String(device.power ?? '');
-  qs('#diStatus').value = String(device.status ?? '');
   deviceInfoModalInstance.show();
 }
 
@@ -789,6 +1004,7 @@ function showAddApplianceModal(ctx) {
   }
   pendingCreate.appliance = ctx;
   clearApplianceFormFields();
+  setApplianceExtrasEnabled(Boolean(state.hasApplianceExtras));
   addApplianceModalInstance.show();
   // Some browsers apply autofill after modal paint; force clear again.
   window.setTimeout(clearApplianceFormFields, 0);
@@ -800,13 +1016,15 @@ function hideAddApplianceModal() {
 }
 
 function clearApplianceFormFields() {
-  const type = qs('#aaType');
-  const status = qs('#aaStatus');
-  if (type) type.selectedIndex = 0;
-  if (status) status.selectedIndex = 0;
   qs('#aaName').value = '';
   qs('#aaId').value = '';
   qs('#aaIp').value = '';
+  const brand = qs('#aaBrand');
+  if (brand) brand.value = '';
+  const volts = qs('#aaVolts');
+  if (volts) volts.value = '';
+  const switchCode = qs('#aaSwitchCode');
+  if (switchCode) switchCode.value = '';
   qs('#aaPower').value = '';
   qs('#aaHp').value = '';
   qs('#aaCurrent').value = '';
@@ -874,24 +1092,23 @@ async function saveNewAppliance() {
     return;
   }
 
-  const applianceType = String(qs('#aaType').value || '').trim().toLowerCase();
+  const applianceType = String(pendingCreate.appliance.apType || '').trim().toLowerCase();
   const applianceName = String(qs('#aaName').value || '').trim();
   const applianceId = String(qs('#aaId').value || '').trim();
   const ipaddress = String(qs('#aaIp').value || '').trim();
-  const status = String(qs('#aaStatus').value || '').trim().toUpperCase();
+  const brand = String(qs('#aaBrand')?.value || '').trim();
+  const voltsRaw = String(qs('#aaVolts')?.value || '').trim();
+  const switchCode = String(qs('#aaSwitchCode')?.value || '').trim();
   const powerRaw = String(qs('#aaPower').value || '').trim();
   const hpRaw = String(qs('#aaHp').value || '').trim();
   const currentRaw = String(qs('#aaCurrent').value || '').trim();
   const power = Number.parseFloat(powerRaw);
   const hp = Number.parseFloat(hpRaw);
   const current = Number.parseFloat(currentRaw);
+  const volts = Number.parseFloat(voltsRaw);
 
   if (!applianceType) {
-    alert('Type is required.');
-    return;
-  }
-  if (!status) {
-    alert('Status is required.');
+    alert('Appliance type is missing. Drag an appliance icon (AC/Fan/Light) into a room.');
     return;
   }
   if (!applianceName) {
@@ -905,6 +1122,20 @@ async function saveNewAppliance() {
   if (!ipV4Valid(ipaddress)) {
     alert('Enter a valid appliance IPv4 address.');
     return;
+  }
+  if (!brand) {
+    alert('Brand is required.');
+    return;
+  }
+  if (state.hasApplianceExtras) {
+    if (!voltsRaw || !Number.isFinite(volts) || volts < 0) {
+      alert('Volts must be a valid non-negative number.');
+      return;
+    }
+    if (!switchCode) {
+      alert('Switch Code is required.');
+      return;
+    }
   }
   if (!powerRaw || !hpRaw || !currentRaw) {
     alert('Power, HP and Current are required.');
@@ -921,11 +1152,13 @@ async function saveNewAppliance() {
     appliance_type: applianceType,
     appliance_name: applianceName,
     appliance_id: applianceId,
+    brand,
+    ...(state.hasApplianceExtras ? { volts, switch_code: switchCode } : {}),
     ipaddress,
     power,
     hp,
     current,
-    status: status === 'ON' ? 'ON' : 'OF',
+    status: 'OF',
   };
 
   try {
@@ -946,17 +1179,41 @@ async function saveNewAppliance() {
 }
 
 async function saveNewDevice() {
+  const deviceIdRaw = String(qs('#adDeviceId').value || '').trim();
   const ip = String(qs('#adIp').value || '').trim();
   const rawSwitch = String(qs('#adSwitch').value || '').trim();
-  const name = String(qs('#adName').value || '').trim();
-  const fw = String(qs('#adFw').value || '').trim() || 'v1.0';
-  const status = String(qs('#adStatus').value || '').trim() || '1';
+  const currentRaw = String(qs('#adCurrent')?.value || '').trim();
+  const voltage = String(qs('#adVoltage')?.value || '').trim();
   const powerRaw = String(qs('#adPower').value || '').trim();
   const power = powerRaw === '' ? 0 : Number.parseFloat(powerRaw);
 
   const sw = Number.parseInt(rawSwitch, 10);
   if (!Number.isInteger(sw) || sw <= 0) {
     alert('Switch capacity must be a positive number.');
+    return;
+  }
+
+  if (![1, 2, 4, 8, 16].includes(sw)) {
+    alert('Switch capacity must be one of 1, 2, 4, 8, 16.');
+    return;
+  }
+
+  const deviceId = Number.parseInt(deviceIdRaw, 10);
+  if (!Number.isInteger(deviceId) || deviceId <= 0) {
+    alert('Device ID is not valid. Re-open the modal to regenerate it.');
+    return;
+  }
+
+  if (currentRaw !== '') {
+    const current = Number.parseFloat(currentRaw);
+    if (!Number.isFinite(current) || current < 0) {
+      alert('Current-A must be a valid non-negative number.');
+      return;
+    }
+  }
+
+  if (voltage !== '' && voltage.length > 20) {
+    alert('Voltage value is too long.');
     return;
   }
 
@@ -970,12 +1227,11 @@ async function saveNewDevice() {
   }
 
   const payload = {
+    device_id: deviceId,
     IP_address: ip,
     switch: sw,
-    name: name || undefined,
-    fw,
     power,
-    status,
+    status: '1',
   };
 
   try {
@@ -984,10 +1240,11 @@ async function saveNewDevice() {
     qs('#adDeviceId').value = 'Auto-generated';
     qs('#adIp').value = '';
     qs('#adSwitch').value = '';
-    qs('#adName').value = '';
-    qs('#adFw').value = 'v1.0';
+    const cur = qs('#adCurrent');
+    if (cur) cur.value = '';
+    const volt = qs('#adVoltage');
+    if (volt) volt.value = '';
     qs('#adPower').value = '';
-    qs('#adStatus').value = '1';
     await loadDevices();
   } catch (err) {
     alert(err.message);
@@ -1007,8 +1264,9 @@ function init() {
   setupPaletteDraggables();
   setupPLCDropzone();
 
-  qs('#adFw').value = 'v1.0';
-  qs('#adStatus').value = '1';
+  clearDevicePanel();
+  renderPLC();
+
   qs('#btnAddDevice').addEventListener('click', showAddDeviceModal);
   document.addEventListener('click', hideToggleMenu);
   qs('.main').addEventListener('scroll', () => requestAnimationFrame(drawConnectors));
@@ -1019,6 +1277,8 @@ function init() {
     if (e.target.id === 'modalBackdrop') hideModal();
   });
   qs('#addDeviceSave').addEventListener('click', saveNewDevice);
+  const saveEdit = qs('#editDeviceSave');
+  if (saveEdit) saveEdit.addEventListener('click', saveDeviceEdits);
   qs('#addRoomSave').addEventListener('click', saveNewRoom);
   qs('#addApplianceSave').addEventListener('click', saveNewAppliance);
 

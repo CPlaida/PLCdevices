@@ -13,15 +13,36 @@ if ($deviceId <= 0) {
 try {
     $pdo = db();
 
+    $hasExtraColumns = false;
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM PLCdeployment LIKE 'appliance_type'")->fetch();
+        $hasExtraColumns = $col !== false;
+    } catch (Throwable $e) {
+        $hasExtraColumns = false;
+    }
+
     $stmtRooms = $pdo->prepare('SELECT room_id, roomnoname, bldgno, appliances, ipaddress, device_id FROM roomdeployment WHERE device_id=? ORDER BY room_id ASC');
     $stmtRooms->execute([$deviceId]);
     $rooms = $stmtRooms->fetchAll();
 
-    $stmtApps = $pdo->prepare('SELECT d.deployment_id, d.room_id, d.appliance_name, d.appliance_id, d.ipaddress, d.power, d.hp, d.current, d.status FROM PLCdeployment d INNER JOIN roomdeployment r ON r.room_id=d.room_id WHERE r.device_id=? ORDER BY d.deployment_id ASC');
-    $stmtApps->execute([$deviceId]);
-    $apps = $stmtApps->fetchAll();
+    if ($hasExtraColumns) {
+        $stmtApps = $pdo->prepare('SELECT d.deployment_id, d.room_id, d.appliance_type, d.appliance_name, d.appliance_id, d.brand, d.volts, d.switch_code, d.ipaddress, d.power, d.hp, d.current, d.status FROM PLCdeployment d INNER JOIN roomdeployment r ON r.room_id=d.room_id WHERE r.device_id=? ORDER BY d.deployment_id ASC');
+        $stmtApps->execute([$deviceId]);
+        $apps = $stmtApps->fetchAll();
+    } else {
+        $stmtApps = $pdo->prepare('SELECT d.deployment_id, d.room_id, d.appliance_name, d.appliance_id, d.ipaddress, d.power, d.hp, d.current, d.status FROM PLCdeployment d INNER JOIN roomdeployment r ON r.room_id=d.room_id WHERE r.device_id=? ORDER BY d.deployment_id ASC');
+        $stmtApps->execute([$deviceId]);
+        $apps = $stmtApps->fetchAll();
+        foreach ($apps as &$app) {
+            $app['appliance_type'] = '';
+            $app['brand'] = '';
+            $app['volts'] = 0;
+            $app['switch_code'] = '';
+        }
+        unset($app);
+    }
 
-    json_response(['ok' => true, 'rooms' => $rooms, 'appliances' => $apps]);
+    json_response(['ok' => true, 'rooms' => $rooms, 'appliances' => $apps, 'has_appliance_extras' => $hasExtraColumns]);
 } catch (Throwable $e) {
     json_response(['ok' => false, 'error' => 'Failed to load deployment'], 500);
 }

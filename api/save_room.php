@@ -21,10 +21,25 @@ try {
     $pdo = db();
 
     // Validate device exists
-    $stmt = $pdo->prepare('SELECT device_id FROM PLCdevices WHERE device_id=?');
+    $stmt = $pdo->prepare('SELECT device_id, `switch` FROM PLCdevices WHERE device_id=?');
     $stmt->execute([$deviceId]);
-    if (!(int)$stmt->fetchColumn()) {
+    $device = $stmt->fetch();
+    if (!$device) {
         json_response(['ok' => false, 'error' => 'Invalid device'], 400);
+        exit;
+    }
+
+    $mark = (int)($device['switch'] ?? 0);
+    if ($mark <= 0) {
+        json_response(['ok' => false, 'error' => 'Invalid device marking'], 409);
+        exit;
+    }
+
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM roomdeployment WHERE device_id=?');
+    $stmt->execute([$deviceId]);
+    $roomCount = (int)($stmt->fetchColumn() ?: 0);
+    if ($roomCount >= $mark) {
+        json_response(['ok' => false, 'error' => 'Mark capacity reached: cannot add more rooms to this PLC'], 409);
         exit;
     }
 

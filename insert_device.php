@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
 
+require __DIR__ . '/api/db.php';
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['ok' => false, 'error' => 'Method not allowed']);
@@ -23,9 +25,10 @@ if (!$body) {
 }
 
 $name = trim((string)($body['name'] ?? ''));
+$deviceIdRaw = trim((string)($body['device_id'] ?? ''));
 $ipAddress = trim((string)($body['IP_address'] ?? ''));
 $switch = (int)($body['switch'] ?? 0);
-$fw = trim((string)($body['fw'] ?? 'v1.0'));
+$fw = trim((string)($body['fw'] ?? ''));
 $power = (float)($body['power'] ?? 0);
 $status = trim((string)($body['status'] ?? '1'));
 
@@ -45,60 +48,52 @@ if ($switch <= 0) {
     exit;
 }
 
-$host = '127.0.0.1';
-$user = 'root';
-$pass = '';
-$databases = ['plc_management'];
-
-$conn = null;
-foreach ($databases as $dbName) {
-    try {
-        $tmp = new mysqli($host, $user, $pass, $dbName);
-        if (!$tmp->connect_errno) {
-            $conn = $tmp;
-            break;
-        }
-    } catch (Throwable $e) {
-        // Try the next configured database name.
-        continue;
-    }
-}
-
-if (!$conn instanceof mysqli) {
-    http_response_code(500);
-    echo json_encode(['ok' => false, 'error' => 'Database connection failed']);
+$allowedSwitches = [1, 2, 4, 8, 16];
+if (!in_array($switch, $allowedSwitches, true)) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'error' => 'switch must be one of 1, 2, 4, 8, 16']);
     exit;
 }
 
-$conn->set_charset('utf8mb4');
+if ($fw === '') {
+    $fw = 'v1.0';
+}
+
+$status = strtoupper($status);
+if (!in_array($status, ['ON', 'OF', '0', '1', 'OFF'], true)) {
+    $status = '1';
+}
+
+$deviceId = null;
+if ($deviceIdRaw !== '') {
+    if (!ctype_digit($deviceIdRaw)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'device_id must be an integer']);
+        exit;
+    }
+    $deviceId = (int)$deviceIdRaw;
+}
 
 try {
-    $sql = 'INSERT INTO PLCdevices (name, IP_address, fw, `switch`, power, status) VALUES (?, ?, ?, ?, ?, ?)';
-    $stmt = $conn->prepare($sql);
-    if (!$stmt) {
-        throw new RuntimeException('Prepare failed');
-    }
-    $stmt->bind_param('sssids', $name, $ipAddress, $fw, $switch, $power, $status);
-
-    if (!$stmt->execute()) {
-        throw new RuntimeException('Execute failed');
+    if ($deviceId !== null) {
+        $stmt = db()->prepare('INSERT INTO PLCdevices (device_id, name, IP_address, fw, `switch`, power, status) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        $stmt->execute([$deviceId, $name, $ipAddress, $fw, $switch, $power, $status]);
+        echo json_encode(['ok' => true, 'device_id' => $deviceId]);
+        exit;
     }
 
-    $savedId = (int)$conn->insert_id;
+    $stmt = db()->prepare('INSERT INTO PLCdevices (name, IP_address, fw, `switch`, power, status) VALUES (?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$name, $ipAddress, $fw, $switch, $power, $status]);
+    $savedId = (int)db()->lastInsertId();
     echo json_encode(['ok' => true, 'device_id' => $savedId]);
 } catch (Throwable $e) {
     $error = 'Failed to insert device';
     $statusCode = 500;
-    if ($e instanceof mysqli_sql_exception && (int)$e->getCode() === 1062) {
+    if (str_contains(strtolower($e->getMessage()), 'duplicate') || (int)$e->getCode() === 23000) {
         $error = 'Device ID already exists. Use another ID or leave it blank.';
         $statusCode = 409;
     }
     http_response_code($statusCode);
     echo json_encode(['ok' => false, 'error' => $error]);
-} finally {
-    if (isset($stmt) && $stmt instanceof mysqli_stmt) {
-        $stmt->close();
-    }
-    $conn->close();
 }
 

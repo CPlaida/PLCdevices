@@ -12,11 +12,28 @@ if ($deploymentId <= 0) {
 
 try {
     $pdo = db();
-    $stmt = $pdo->prepare(
-        'SELECT deployment_id, appliance_name, appliance_id, power, hp, current, status
-         FROM PLCdeployment
-         WHERE deployment_id=?'
-    );
+
+    $hasExtraColumns = false;
+    try {
+        $col = $pdo->query("SHOW COLUMNS FROM PLCdeployment LIKE 'appliance_type'")->fetch();
+        $hasExtraColumns = $col !== false;
+    } catch (Throwable $e) {
+        $hasExtraColumns = false;
+    }
+
+    if ($hasExtraColumns) {
+        $stmt = $pdo->prepare(
+            'SELECT deployment_id, appliance_type, appliance_name, appliance_id, brand, volts, switch_code, ipaddress, power, hp, current, status
+             FROM PLCdeployment
+             WHERE deployment_id=?'
+        );
+    } else {
+        $stmt = $pdo->prepare(
+            'SELECT deployment_id, appliance_name, appliance_id, ipaddress, power, hp, current, status
+             FROM PLCdeployment
+             WHERE deployment_id=?'
+        );
+    }
     $stmt->execute([$deploymentId]);
     $row = $stmt->fetch();
     if (!$row) {
@@ -24,9 +41,13 @@ try {
         exit;
     }
 
-    // Keep UI contract without depending on extra tables.
-    $row['brand'] = 'GENERIC';
-    $row['volts'] = 220;
+    if (!$hasExtraColumns) {
+        $row['appliance_type'] = '';
+        $row['brand'] = '';
+        $row['volts'] = 0;
+        $row['switch_code'] = '';
+    }
+
     $row['watts'] = (float)$row['power'];
 
     json_response(['ok' => true, 'appliance' => $row]);
